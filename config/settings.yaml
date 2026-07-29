@@ -1,0 +1,10 @@
+output_file: output/Oracle_Fusion_Impact_Analyzer_Enterprise.xlsx
+max_rows: 5000
+column_width: 28
+
+colours:
+  header_fill: "1F4E78"
+  critical:    "8B0000"
+  high:        "FFA500"
+  medium:      "FFFF00"
+  low:         "90EE90"

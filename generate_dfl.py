@@ -142,12 +142,31 @@ def generate_dfl():
             "Close the file in Excel and re-run."
         )
 
+    # Count total impacts from JSON if present
+    import json as _json
+    _impacts_path = project_root / "dfl_26c_impacts.json"
+    _impact_count = 0
+    if _impacts_path.exists():
+        try:
+            with open(_impacts_path, encoding="utf-8") as fh:
+                raw = fh.read()
+                if raw and raw[0] == "\ufeff":
+                    raw = raw[1:]
+                _impact_count = len(_json.loads(raw))
+        except Exception:
+            pass
+
     print(f"\nDFL 26C Impact Assessment workbook saved:")
     print(f"  {output_path}")
     print(f"\nSummary:")
     print(f"  Client:   Dignity Funerals Limited (DFL)")
     print(f"  Release:  Oracle Fusion 26C")
-    print(f"  Changes:  21 in-scope changes assessed")
+    from src.dfl_seed import _CHANGES as _curated
+    _curated_count = len(_curated)
+    print(f"  Curated changes:       {_curated_count} (CHG_PAY_*, CHG_HR_*, CHG_FIN_*, CHG_OM_* etc.)")
+    if _impact_count:
+        print(f"  MCP-sourced impacts:   {_impact_count} (CHG_IMP_* / ASMT_IMP_*)")
+        print(f"  Total Release_Changes: {_curated_count + _impact_count}")
     print(f"  Critical: CHG_FIN_003 (SOAP API deprecation), CHG_PAY_002 (UK payroll legislation)")
     print(f"  High:     CHG_HR_001, CHG_HR_002, CHG_ABS_002, CHG_FIN_002, CHG_FIN_004, CHG_OM_001")
     return output_path

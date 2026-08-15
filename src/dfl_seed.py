@@ -19,7 +19,12 @@ Usage
 
 from __future__ import annotations
 
+import json
 from datetime import date
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_IMPACTS_JSON = _PROJECT_ROOT / "dfl_26c_impacts.json"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -870,6 +875,141 @@ def _seed_dfl_test_cases(wb) -> None:
     _write_rows(wb["Test_Cases"], rows)
 
 
+def _seed_dfl_full_impacts(wb) -> None:
+    """
+    Populate Release_Changes and Impact_Assessments from dfl_26c_impacts.json.
+
+    This seeds all 555 MCP-sourced Oracle 26C features that are in scope for DFL,
+    in addition to the 21 curated hand-crafted changes.  Each impact item becomes:
+      - A row in Release_Changes  (prefixed CHG_IMP_NNN)
+      - A row in Impact_Assessments (prefixed ASMT_IMP_NNN)
+
+    The curated _CHANGES rows (CHG_PAY_001…) are written first by _seed_dfl_changes()
+    and _seed_dfl_impact_assessments(); this function appends after them.
+    """
+    if not _IMPACTS_JSON.exists():
+        return  # graceful no-op if JSON not present (e.g. CI without data)
+
+    with open(_IMPACTS_JSON, encoding="utf-8") as fh:
+        raw = fh.read()
+        # Strip UTF-8 BOM if present
+        if raw and raw[0] == "\ufeff":
+            raw = raw[1:]
+        impacts: list[dict] = json.loads(raw)
+
+    # Severity → Oracle score mapping
+    sev_score = {"Critical": 5, "High": 4, "Medium": 3, "Low": 1}
+    # module → business criticality for DFL
+    module_biz = {
+        "Payroll":              5, "Human Resources":      5,
+        "Absence Management":   4, "Time and Labor":       4,
+        "Financials":           5, "Procurement":          4,
+        "Benefits":             4, "Compensation":         3,
+        "Recruiting":           3, "Learning and Development": 2,
+        "Workforce Scheduling": 4, "Project Management":   2,
+        "Inventory Management": 3, "Order Management":     4,
+        "Risk Management":      2, "HCM Common":           1,
+        "Common Technologies and User Experience": 1,
+        "Oracle Me Employee Experience": 1,
+        "Talent Management":    2, "Self Service Financials": 2,
+        "Self Service Procurement": 3, "Dynamic Skills":   1,
+        "Opportunity Marketplace": 1, "Work Life":         1,
+    }
+    module_integration = {
+        "Payroll":              3, "Human Resources":      3,
+        "Absence Management":   2, "Time and Labor":       2,
+        "Financials":           5, "Procurement":          4,
+        "Benefits":             2, "Compensation":         2,
+        "Recruiting":           2, "Learning and Development": 1,
+        "Workforce Scheduling": 2, "Project Management":   2,
+        "Inventory Management": 3, "Order Management":     4,
+        "Risk Management":      1, "HCM Common":           1,
+        "Common Technologies and User Experience": 2,
+        "Oracle Me Employee Experience": 1,
+        "Talent Management":    2, "Self Service Financials": 2,
+        "Self Service Procurement": 2, "Dynamic Skills":   1,
+        "Opportunity Marketplace": 1, "Work Life":         1,
+    }
+
+    # Starting row offsets — append after the 21 curated rows
+    curated_count = len(_CHANGES)
+    rc_ws = wb["Release_Changes"]
+    ia_ws = wb["Impact_Assessments"]
+
+    for i, imp in enumerate(impacts):
+        chg_id   = f"CHG_IMP_{i + 1:04d}"
+        asmt_id  = f"ASMT_IMP_{i + 1:04d}"
+        mod      = imp.get("module", "")
+        sev      = imp.get("severity", "Low")
+        biz      = imp.get("biz_score") or module_biz.get(mod, 2)
+        oracle_s = imp.get("oracle_score") or sev_score.get(sev, 1)
+        integ    = module_integration.get(mod, 2)
+        req_act  = imp.get("action_text", "")
+        is_ai    = imp.get("is_ai", False)
+        req      = imp.get("requires_action", False)
+        desc     = imp.get("description", "")[:500] if imp.get("description") else ""
+
+        # ── Release_Changes row ────────────────────────────────────────────────
+        rc_row = [
+            chg_id,
+            _RELEASE_ID,
+            imp.get("feature_name", ""),
+            desc,
+            mod,
+            "AI Feature" if is_ai else "Functional",
+            "AI Feature" if is_ai else "Functional",
+            "",                # Technical_Object
+            "",                # API_Service
+            mod,               # Config_Area
+            "N",               # Security_Flag
+            "Y" if req else "N",  # Compliance_Flag
+            "N",               # Deprecation_Flag
+            req_act[:200] if req_act else "Auto-enabled — no action required",
+            sev,               # Oracle_Severity
+            "2025-06-20",      # Effective_Date
+            f"Oracle Fusion 26C Readiness — {mod}",
+            "",                # Source_Section
+        ]
+        row_idx = curated_count + i + 2  # +2 for header + curated block
+        for c_idx, val in enumerate(rc_row, start=1):
+            rc_ws.cell(row=row_idx, column=c_idx, value=val)
+
+        # ── Impact_Assessments row ─────────────────────────────────────────────
+        sec_score = 3 if is_ai else 1
+        ia_row_values = {
+            1:  asmt_id,
+            2:  _CLIENT_ID,
+            3:  _RELEASE_ID,
+            4:  chg_id,
+            5:  "AI Feature" if is_ai else "Functional",
+            6:  "Configuration",
+            7:  "",
+            8:  f"DFL {mod} impacted by Oracle 26C change",
+            9:  "Y",
+            10: "N",
+            11: "N",
+            12: "N",
+            13: biz,
+            14: 2,   # customization score (default)
+            15: integ,
+            16: sec_score,
+            17: 3,   # environment score
+            # 18: formula (Oracle_Change_Score)
+            19: oracle_s,   # History_Score proxy
+            # 20: formula (Total_Risk_Score)
+            # 21: formula (Risk_Level)
+            22: "Pending Review",
+            23: "",
+            24: "",
+            25: req_act[:200] if req_act else "",
+            26: "Y" if sev in ("Critical", "High", "Medium") else "N",
+            27: "Y" if sev in ("Critical", "High") else "N",
+        }
+        ia_row_idx = curated_count + i + 2
+        for c_idx, val in ia_row_values.items():
+            ia_ws.cell(row=ia_row_idx, column=c_idx, value=val)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Public entry point
 # ──────────────────────────────────────────────────────────────────────────────
@@ -886,3 +1026,4 @@ def seed_dfl(wb) -> None:
     _seed_dfl_impact_assessments(wb)
     _seed_dfl_remediation(wb)
     _seed_dfl_test_cases(wb)
+    _seed_dfl_full_impacts(wb)
